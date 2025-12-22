@@ -238,23 +238,41 @@ class AutoLogin:
             self.shot(page, "验证后")
         
         # 2FA
+# --- 找到 login_github 方法中的 2FA 处理部分 ---
         if 'two-factor' in page.url:
-            self.log(f"检测到两步验证页面，等待用户完成（最多 {TWO_FACTOR_WAIT} 秒）...", "WARN")
-            # 通知用户在 GitHub 页面输入或通过设备批准
-            self.tg.send(f"⚠️ <b>需要两步验证</b>\n\n请在 {TWO_FACTOR_WAIT} 秒内在 GitHub 页面输入验证码或在 GitHub App/邮箱中批准登录。")
-            self.shot(page, "github_2fa")
+            self.log(f"检测到两步验证页面，等待用户完成...", "WARN")
+            
+            # 1. 立即截一张新鲜的 2FA 码图
+            f_2fa = self.shot(page, "github_2fa_realtime")
+            
+            # 2. 这里的通知要带上图片！不要只发文字
+            msg_2fa = f"⚠️ <b>需要两步验证</b>\n\n请在 {TWO_FACTOR_WAIT} 秒内操作。\n"
+            if "sms" in page.content().lower():
+                msg_2fa += "📱 验证码已通过短信发送"
+            elif "authenticator" in page.content().lower():
+                msg_2fa += "🔐 请查看身份验证器 App"
+            
+            self.tg.send(msg_2fa)
+            self.tg.photo(f_2fa, "这是当前的 2FA 验证界面，快看！") # 这一行是关键
 
             for i in range(TWO_FACTOR_WAIT):
                 time.sleep(1)
-                if i % 5 == 0:
+                if i % 10 == 0: # 每10秒报个平安，顺便刷新下页面看有没有变动
                     self.log(f"  等待 2FA... ({i}/{TWO_FACTOR_WAIT}秒)")
-                try:
-                    page.reload(timeout=10000)
-                    page.wait_for_load_state('networkidle', timeout=10000)
-                except:
-                    pass
+                    try:
+                        page.reload(timeout=10000)
+                        page.wait_for_load_state('networkidle', timeout=10000)
+                    except:
+                        pass
+                    
+                    # 如果你怕错过某些动态验证码，可以在这里加个逻辑：
+                    # 每 20 秒再发一张新图，防止页面刷新后验证码变了
+                    # if i > 0 and i % 20 == 0:
+                    #     self.tg.photo(self.shot(page, f"2fa_retry_{i}"), f"还在等呢，第 {i} 秒的情况")
+
                 if 'two-factor' not in page.url:
-                    self.log("检测到 2FA 已完成，继续后续流程", "SUCCESS")
+                    self.log("检测到 2FA 已完成", "SUCCESS")
+                    self.tg.send("✅ <b>2FA 验证成功，正在进入 ClawCloud...</b>")
                     break
             else:
                 self.log("两步验证超时", "ERROR")
